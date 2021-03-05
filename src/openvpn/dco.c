@@ -44,6 +44,7 @@ static bool
 dco_multi_get_localaddr(struct multi_context *m, struct multi_instance *mi,
                         struct sockaddr_storage *local)
 {
+#if ENABLE_IP_PKTINFO
     struct context *c = &mi->context;
 
     if (!(c->options.sockflags & SF_USE_IP_PKTINFO))
@@ -74,6 +75,9 @@ dco_multi_get_localaddr(struct multi_context *m, struct multi_instance *mi,
     }
 
     return true;
+#else
+    return false;
+#endif
 }
 
 int
@@ -424,6 +428,25 @@ dco_check_option_conflict_ce(const struct connection_entry *ce, int msglevel)
     return false;
 }
 
+static bool
+dco_check_option_conflict_platform(int msglevel, const struct options *o)
+{
+#if defined(_WIN32)
+    if (o->mode == MODE_SERVER)
+    {
+        msg(msglevel, "Only client and p2p data channel offload is supported "
+                      "with ovpn-dco-win.");
+        return true;
+    }
+    if (o->persist_tun)
+    {
+        msg(msglevel, "--persist-tun is not supported with ovpn-dco-win.");
+        return true;
+    }
+#endif
+    return false;
+}
+
 bool
 dco_check_option_conflict(int msglevel, const struct options *o)
 {
@@ -434,6 +457,11 @@ dco_check_option_conflict(int msglevel, const struct options *o)
     }
 
     if (!dco_available(msglevel))
+    {
+        return true;
+    }
+
+    if (dco_check_option_conflict_platform(msglevel, o))
     {
         return true;
     }

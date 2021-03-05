@@ -254,6 +254,7 @@
     <ClCompile Include="crypto_openssl.c" />
     <ClCompile Include="cryptoapi.c" />
     <ClCompile Include="dco.c" />
+    <ClCompile Include="dco_win.c" />
     <ClCompile Include="dhcp.c" />
     <ClCompile Include="env_set.c" />
     <ClCompile Include="error.c" />
@@ -339,6 +340,7 @@
     <ClInclude Include="crypto_openssl.h" />
     <ClInclude Include="cryptoapi.h" />
     <ClInclude Include="dco.h" />
+    <ClInclude Include="dco_win.h" />
     <ClInclude Include="dhcp.h" />
     <ClInclude Include="env_set.h" />
     <ClInclude Include="errlevel.h" />
