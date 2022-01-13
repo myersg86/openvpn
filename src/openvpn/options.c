@@ -61,6 +61,7 @@
 #include "ssl_verify.h"
 #include "platform.h"
 #include "xkey_common.h"
+#include "dco.h"
 #include <ctype.h>
 
 #include "memdbg.h"
@@ -106,6 +107,9 @@ const char title_string[] =
 #endif
 #endif
     " [AEAD]"
+#ifdef ENABLE_DCO
+    " [DCO]"
+#endif
     " built on " __DATE__
 ;
 
@@ -3306,6 +3310,11 @@ options_postprocess_mutate(struct options *o)
         o->verify_hash_no_ca = true;
     }
 
+    /* check if any option should force disabling DCO */
+#if defined(TARGET_LINUX)
+    o->tuntap_options.disable_dco = dco_check_option_conflict(D_DCO, o);
+#endif
+
     /*
      * Save certain parms before modifying options during connect, especially
      * when using --pull
@@ -5618,6 +5627,12 @@ add_option(struct options *options,
         options->windows_driver = parse_windows_driver(p[1], M_FATAL);
     }
 #endif
+    else if (streq(p[0], "disable-dco") || streq(p[0], "dco-disable"))
+    {
+#if defined(TARGET_LINUX)
+        options->tuntap_options.disable_dco = true;
+#endif
+    }
     else if (streq(p[0], "dev-node") && p[1] && !p[2])
     {
         VERIFY_PERMISSION(OPT_P_GENERAL);

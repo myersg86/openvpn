@@ -54,6 +54,7 @@
 #include "forward.h"
 #include "auth_token.h"
 #include "mss.h"
+#include "dco.h"
 
 #include "memdbg.h"
 
@@ -1304,15 +1305,23 @@ do_init_timers(struct context *c, bool deferred)
     }
 
     /* initialize pings */
-
-    if (c->options.ping_send_timeout)
+    if (dco_enabled(&c->options))
     {
-        event_timeout_init(&c->c2.ping_send_interval, c->options.ping_send_timeout, 0);
+        /* The DCO kernel module will send the pings instead of user space */
+        event_timeout_clear(&c->c2.ping_rec_interval);
+        event_timeout_clear(&c->c2.ping_send_interval);
     }
-
-    if (c->options.ping_rec_timeout)
+    else
     {
-        event_timeout_init(&c->c2.ping_rec_interval, c->options.ping_rec_timeout, now);
+        if (c->options.ping_send_timeout)
+        {
+            event_timeout_init(&c->c2.ping_send_interval, c->options.ping_send_timeout, 0);
+        }
+
+        if (c->options.ping_rec_timeout)
+        {
+            event_timeout_init(&c->c2.ping_rec_interval, c->options.ping_rec_timeout, now);
+        }
     }
 
     if (!deferred)
@@ -1707,6 +1716,12 @@ do_open_tun(struct context *c)
     /* initialize (but do not open) tun/tap object */
     do_init_tun(c);
 
+    /* inherit the dco context from the tuntap object */
+    if (c->c2.tls_multi)
+    {
+        c->c2.tls_multi->dco = &c->c1.tuntap->dco;
+    }
+
 #ifdef _WIN32
     /* store (hide) interactive service handle in tuntap_options */
     c->c1.tuntap->options.msg_channel = c->options.msg_channel;
@@ -1755,9 +1770,14 @@ do_open_tun(struct context *c)
     /* Store the old fd inside the fd so open_tun can use it */
     c->c1.tuntap->fd = oldtunfd;
 #endif
+    if (dco_enabled(&c->options))
+    {
+        ovpn_dco_init(&c->c1.tuntap->dco);
+    }
+
     /* open the tun device */
     open_tun(c->options.dev, c->options.dev_type, c->options.dev_node,
-             c->c1.tuntap);
+             c->c1.tuntap, &c->net_ctx);
 
     /* set the hardware address */
     if (c->options.lladdr)
@@ -2024,6 +2044,7 @@ tun_abort(void)
  * Handle delayed tun/tap interface bringup due to --up-delay or --pull
  */
 
+
 /**
  * Helper for do_up().  Take two option hashes and return true if they are not
  * equal, or either one is all-zeroes.
@@ -2043,23 +2064,6 @@ do_up(struct context *c, bool pulled_options, unsigned int option_types_found)
     if (!c->c2.do_up_ran)
     {
         reset_coarse_timers(c);
-
-        if (pulled_options)
-        {
-            if (!do_deferred_options(c, option_types_found))
-            {
-                msg(D_PUSH_ERRORS, "ERROR: Failed to apply push options");
-                return false;
-            }
-        }
-        else if (c->mode == MODE_POINT_TO_POINT)
-        {
-            if (!do_deferred_p2p_ncp(c))
-            {
-                msg(D_TLS_ERRORS, "ERROR: Failed to apply P2P negotiated protocol options");
-                return false;
-            }
-        }
 
         /* if --up-delay specified, open tun, do ifconfig, and run up script now */
         if (c->options.up_delay || PULL_DEFINED(&c->options))
@@ -2083,6 +2087,23 @@ do_up(struct context *c, bool pulled_options, unsigned int option_types_found)
                 management_sleep(1);
                 c->c2.did_open_tun = do_open_tun(c);
                 update_time();
+            }
+        }
+
+        if (pulled_options)
+        {
+            if (!do_deferred_options(c, option_types_found))
+            {
+                msg(D_PUSH_ERRORS, "ERROR: Failed to apply push options");
+                return false;
+            }
+        }
+        else if (c->mode == MODE_POINT_TO_POINT)
+        {
+            if (!do_deferred_p2p_ncp(c))
+            {
+                msg(D_TLS_ERRORS, "ERROR: Failed to apply P2P negotiated protocol options");
+                return false;
             }
         }
 
@@ -2206,10 +2227,22 @@ do_deferred_p2p_ncp(struct context *c)
     }
 #endif
 
-    if (!tls_session_update_crypto_params(session, &c->options, &c->c2.frame,
-                                         frame_fragment))
+    if (!tls_session_update_crypto_params(c->c2.tls_multi, session, &c->options,
+                                          &c->c2.frame, frame_fragment))
     {
         msg(D_TLS_ERRORS, "ERROR: failed to set crypto cipher");
+        return false;
+    }
+    return true;
+}
+
+
+static bool check_dco_pull_options(struct options *o)
+{
+    if (!o->use_peer_id)
+    {
+        msg(D_TLS_ERRORS, "OPTIONS IMPORT: Server did not request DATA_V2 packet "
+                          "format required for data channel offloading");
         return false;
     }
     return true;
@@ -2320,15 +2353,36 @@ do_deferred_options(struct context *c, const unsigned int found)
         }
 #endif
 
+        if (c->c2.did_open_tun)
+        {
+            /* If we are in DCO mode we need to set the new peer options now */
+            int ret = dco_p2p_add_new_peer(c);
+            if (ret < 0)
+            {
+                msg(D_DCO, "Cannot add peer to DCO: %s", strerror(-ret));
+                return false;
+            }
+        }
+
         struct tls_session *session = &c->c2.tls_multi->session[TM_ACTIVE];
-        if (!tls_session_update_crypto_params(session, &c->options, &c->c2.frame,
+        if (!tls_session_update_crypto_params(c->c2.tls_multi, session,
+                                              &c->options, &c->c2.frame,
                                               frame_fragment))
         {
             msg(D_TLS_ERRORS, "OPTIONS ERROR: failed to import crypto options");
             return false;
         }
-    }
 
+        /* Check if the pushed options are compatible with DCO if we have DCO
+         * enabled */
+        if (dco_enabled(&c->options) && !check_dco_pull_options(&c->options))
+        {
+            msg(D_TLS_ERRORS, "OPTIONS ERROR: pushed options are incompatible with "
+                              "data channel offloading. Use --disable-dco to connect"
+                              "to this server");
+            return false;
+        }
+    }
     return true;
 }
 
@@ -2941,6 +2995,9 @@ do_init_crypto_tls(struct context *c, const unsigned int flags)
         }
     }
 
+    /* let the TLS engine know if keys have to be installed in DCO or not */
+    to.disable_dco = !dco_enabled(options);
+
     /* If we are running over TCP, allow for
      * length prefix */
     socket_adjust_frame_parameters(&to.frame, options->ce.proto);
@@ -2951,6 +3008,11 @@ do_init_crypto_tls(struct context *c, const unsigned int flags)
     if (flags & CF_INIT_TLS_MULTI)
     {
         c->c2.tls_multi = tls_multi_init(&to);
+        /* inherit the dco context from the tuntap object */
+        if (c->c1.tuntap)
+        {
+            c->c2.tls_multi->dco = &c->c1.tuntap->dco;
+        }
     }
 
     if (flags & CF_INIT_TLS_AUTH_STANDALONE)
@@ -4273,6 +4335,10 @@ close_instance(struct context *c)
         /* free buffers */
         do_close_free_buf(c);
 
+        /* close peer for DCO if enabled, needs peer-id so must be done before
+         * closing TLS contexts */
+        dco_remove_peer(c);
+
         /* close TLS */
         do_close_tls(c);
 
@@ -4370,14 +4436,17 @@ inherit_context_child(struct context *dest,
 #endif
 
     /* context init */
+
+    /* inherit tun/tap interface object now as it may be required
+     * to initialize the DCO context in init_instance()
+     */
+    dest->c1.tuntap = src->c1.tuntap;
+
     init_instance(dest, src->c2.es, CC_NO_CLOSE | CC_USR1_TO_HUP);
     if (IS_SIG(dest))
     {
         return;
     }
-
-    /* inherit tun/tap interface object */
-    dest->c1.tuntap = src->c1.tuntap;
 
     /* UDP inherits some extra things which TCP does not */
     if (dest->mode == CM_CHILD_UDP)

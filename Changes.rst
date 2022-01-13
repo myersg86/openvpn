@@ -62,6 +62,13 @@ Optional ciphers in ``--data-ciphers``
     Ciphers in ``--data-ciphers`` can now be prefixed with a ``?`` to mark
     those as optional and only use them if the SSL library supports them.
 
+Data channel offloading with ovpn-dco
+    2.6.0+ implements support for data-channel offloading where the data packets
+    are directly processed and forwarded in kernel space thanks to the ovpn-dco
+    kernel module. The userspace openvpn program acts purely as a control plane
+    application.
+
+
 Deprecated features
 -------------------
 ``inetd`` has been removed
