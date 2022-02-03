@@ -9,10 +9,10 @@ IS SUBJECT TO CHANGE.
     CONTENTS
         THE OPENVPN --ECHO OPTION
         ENVIRONMENT COMMAND
-        MESSSAGE COMMANDS
+        MESSAGE COMMANDS
         PASSWORD COMMANDS
         QUOTING
-        COMMMAND DETAILS
+        COMMAND DETAILS
 
 
 =========================
@@ -98,7 +98,7 @@ variables that are available to the scripts that OpenVPN runs.
 
 
 =================
-MESSSAGE COMMANDS
+MESSAGE COMMANDS
 =================
 
 Four commands can be used to display a message to the user from the
@@ -172,7 +172,7 @@ will be sent through the management interface as
 
 
 ================
-COMMMAND DETAILS
+COMMAND DETAILS
 ================
 
 

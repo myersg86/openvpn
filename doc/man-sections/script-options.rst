@@ -93,7 +93,7 @@ SCRIPT HOOKS
   accepted, a failure code (:code:`1`) to reject the client, or a that
   the authentication is deferred (:code:`2`). If the authentication is
   deferred, the script must fork/start a background or another non-blocking
-  operation to continue the authentication in the background. When finshing
+  operation to continue the authentication in the background. When finishing
   the authentication, a :code:`1` or :code:`0` must be written to the
   file specified by the :code:`auth_control_file`.
 

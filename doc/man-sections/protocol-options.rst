@@ -109,7 +109,7 @@ configured in a compatible way between both the local and remote side.
   If the ``algorithm`` parameter is :code:`stub`, :code:`stub-v2` or empty,
   compression will be turned off, but the packet framing for compression
   will still be enabled, allowing a different setting to be pushed later.
-  Additionally, :code:`stub` and :code:`stub-v2` wil disable announcing
+  Additionally, :code:`stub` and :code:`stub-v2` will disable announcing
   ``lzo`` and ``lz4`` compression support via *IV_* variables to the
   server.
 
